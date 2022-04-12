@@ -49,9 +49,9 @@ pub struct CountResponse {
   pub count: i32,
 }
 
-/// Response type of QueryMsg.GetCount
+/// Response type of QueryMsg.GetOwner
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct OwnerResponse {
-  /// count property
+  /// owner property
   pub owner: String,
 }
