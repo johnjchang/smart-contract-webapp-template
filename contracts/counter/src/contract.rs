@@ -231,7 +231,7 @@ mod tests {
     let msg = ExecuteMsg::UpdateOwner { address: String::from("anyone") };
     let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
 
-    // should now be 5
+    // the owner should now be "anyone"
     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
     let value: OwnerResponse = from_binary(&res).unwrap();
     assert_eq!(String::from("anyone"), value.owner);
