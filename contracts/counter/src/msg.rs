@@ -21,6 +21,12 @@ pub enum ExecuteMsg {
     /// count
     count: i32,
   },
+
+  /// update owner (contract owner only)
+  UpdateOwner {
+    /// owner
+    address: String
+  },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -31,6 +37,9 @@ pub struct MigrateMsg {}
 pub enum QueryMsg {
   /// @return CountResponse
   GetCount {},
+  
+  /// @return OwnerResponse
+  GetOwner {},
 }
 
 /// Response type of QueryMsg.GetCount
@@ -38,4 +47,11 @@ pub enum QueryMsg {
 pub struct CountResponse {
   /// count property
   pub count: i32,
+}
+
+/// Response type of QueryMsg.GetOwner
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct OwnerResponse {
+  /// owner property
+  pub owner: String,
 }
