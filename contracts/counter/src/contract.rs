@@ -4,7 +4,7 @@ use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response,
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
+use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, OwnerResponse};
 use crate::state::{State, STATE};
 
 // version info for migration info
@@ -44,6 +44,7 @@ pub fn execute(
     ExecuteMsg::Increment {} => try_increment(deps),
     ExecuteMsg::Decrement {} => try_decrement(deps),
     ExecuteMsg::Reset { count } => try_reset(deps, info, count),
+    ExecuteMsg::UpdateOwner { address } => try_update_owner(deps, info, address),
   }
 }
 
@@ -76,16 +77,38 @@ pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Respons
   Ok(Response::new().add_attribute("method", "reset"))
 }
 
+pub fn try_update_owner(deps: DepsMut, info: MessageInfo, address: String) -> Result<Response, ContractError> {
+ 
+  let mut state: State = STATE.load(deps.storage)?;
+
+  // priv check
+  if info.sender != state.owner {
+    return Err(ContractError::Unauthorized {});
+  }
+
+  // update & persist
+  state.owner = deps.api.addr_validate(&address)?;
+  STATE.save(deps.storage, &state)?;
+ 
+  Ok(Response::new().add_attribute("method", "reset"))
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
   match msg {
     QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
+    QueryMsg::GetOwner {} => to_binary(&query_owner(deps)?),
   }
 }
 
 fn query_count(deps: Deps) -> StdResult<CountResponse> {
   let state = STATE.load(deps.storage)?;
   Ok(CountResponse { count: state.count })
+}
+
+fn query_owner(deps: Deps) -> StdResult<OwnerResponse> {
+  let state = STATE.load(deps.storage)?;
+  Ok(OwnerResponse { owner: state.owner.to_string() })
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -114,6 +137,12 @@ mod tests {
     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
     let value: CountResponse = from_binary(&res).unwrap();
     assert_eq!(17, value.count);
+
+    // test the owner querymsg
+    let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
+    let value: OwnerResponse = from_binary(&res).unwrap();
+    assert_eq!(String::from("creator"), value.owner);
+
   }
 
   #[test]
@@ -178,5 +207,33 @@ mod tests {
     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
     let value: CountResponse = from_binary(&res).unwrap();
     assert_eq!(5, value.count);
+  }
+
+  #[test]
+  fn update_owner() {
+    let mut deps = mock_dependencies(&coins(2, "token"));
+
+    let msg = InstantiateMsg { count: 17 };
+    let info = mock_info("creator", &coins(2, "token"));
+    let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+    // try to set contract's owner to rando sender
+    let unauth_info = mock_info("anyone", &coins(2, "token"));
+    let msg = ExecuteMsg::UpdateOwner { address: unauth_info.sender.to_string() };
+    let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
+    match res {
+      Err(ContractError::Unauthorized {}) => {}
+      _ => panic!("Must return unauthorized error"),
+    }
+
+    // only the original creator can update owner 
+    let auth_info = mock_info("creator", &coins(2, "token"));
+    let msg = ExecuteMsg::UpdateOwner { address: String::from("anyone") };
+    let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+
+    // should now be 5
+    let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
+    let value: OwnerResponse = from_binary(&res).unwrap();
+    assert_eq!(String::from("anyone"), value.owner);
   }
 }
