@@ -4,8 +4,8 @@ use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response,
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, OwnerResponse};
-use crate::state::{State, STATE};
+use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, OwnerResponse, GameMove, GameResult};
+use crate::state::{State, STATE, GameState, GAMES};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:counter";
@@ -46,7 +46,7 @@ pub fn execute(
     ExecuteMsg::Reset { count } => try_reset(deps, info, count),
     ExecuteMsg::UpdateOwner { address } => try_update_owner(deps, info, address),
 
-    ExecuteMsg::StartGame { opponent } => try_start_game(deps, opponent),
+    ExecuteMsg::StartGame { opponent, host_move } => try_start_game(deps, info, opponent, host_move),
   }
 }
 
@@ -95,11 +95,21 @@ pub fn try_update_owner(deps: DepsMut, info: MessageInfo, address: String) -> Re
   Ok(Response::new().add_attribute("method", "reset"))
 }
 
-pub fn try_start_game(deps: DepsMut, opponent: String) -> Result<Response, ContractError> {
+pub fn try_start_game(deps: DepsMut, info: MessageInfo, opponent: String, host_move: GameMove) -> Result<Response, ContractError> {
 
   let opp = deps.api.addr_validate(&opponent)?;
 
-  Ok(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &opp.to_string())]))
+  let game_state: GameState = GameState{
+    host: info.sender.clone(),
+    opponent: opp.clone(),
+    host_move: host_move.clone(),
+    opp_move: None,
+    result: None,
+  };
+
+  GAMES.save(deps.storage, info.sender, &game_state)?;
+
+  Ok(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &opp.to_string()), ("host_move", &match host_move {GameMove::Rock => String::from("rock"), GameMove::Paper => String::from("paper"), GameMove::Scissors => String::from("scissors")})]))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -256,7 +266,7 @@ mod tests {
 
     // try to set contract's owner to rando sender
     let unauth_info = mock_info("", &coins(2, "token"));
-    let msg = ExecuteMsg::StartGame { opponent: unauth_info.sender.to_string() };
+    let msg = ExecuteMsg::StartGame { opponent: unauth_info.sender.to_string(), host_move: GameMove::Rock };
     let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
 
     match res {
@@ -264,12 +274,45 @@ mod tests {
       _ => panic!("Must return unauthorized error"),
     }
 
-    // only a legit address can be an opponent
+    // only a legit address can be an opponent & test rock
     let auth_info = mock_info("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9", &coins(2, "token"));
-    let msg = ExecuteMsg::StartGame { opponent: auth_info.sender.to_string() };
+    let msg = ExecuteMsg::StartGame { opponent: auth_info.sender.to_string(), host_move: GameMove::Rock };
     let res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
 
-    assert_eq!(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &String::from("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9"))]), res)
+    assert_eq!(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &String::from("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9")), ("host_move", &String::from("rock"))]), res)
+
+  }
+
+  #[test]
+  fn start_game_host_moves() {
+    let mut deps = mock_dependencies(&coins(2, "token"));
+
+    let msg = InstantiateMsg { count: 17 };
+    let info = mock_info("creator", &coins(2, "token"));
+    let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+    // test rock
+    let auth_info = mock_info("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame { opponent: auth_info.sender.to_string(), host_move: GameMove::Rock };
+    let res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+
+    assert_eq!(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &String::from("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9")), ("host_move", &String::from("rock"))]), res);
+
+
+    // test paper
+    let auth_info = mock_info("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame { opponent: auth_info.sender.to_string(), host_move: GameMove::Paper };
+    let res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+
+    assert_eq!(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &String::from("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9")), ("host_move", &String::from("paper"))]), res);
+
+
+    // test scissors
+    let auth_info = mock_info("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame { opponent: auth_info.sender.to_string(), host_move: GameMove::Scissors };
+    let res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+
+    assert_eq!(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &String::from("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9")), ("host_move", &String::from("scissors"))]), res);
 
   }
 }

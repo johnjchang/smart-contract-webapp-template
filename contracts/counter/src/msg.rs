@@ -29,7 +29,8 @@ pub enum ExecuteMsg {
   },
 
   StartGame {
-    opponent: String
+    opponent: String,
+    host_move: GameMove,
   },
 }
 
@@ -58,4 +59,19 @@ pub struct CountResponse {
 pub struct OwnerResponse {
   /// owner property
   pub owner: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GameMove {
+  Rock,
+  Paper,
+  Scissors,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub enum GameResult {
+  HostWins,
+  OpponentWins,
+  Tie,
 }
