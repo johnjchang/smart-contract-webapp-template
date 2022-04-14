@@ -27,6 +27,10 @@ pub enum ExecuteMsg {
     /// owner
     address: String
   },
+
+  StartGame {
+    opponent: String
+  },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

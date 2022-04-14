@@ -45,6 +45,8 @@ pub fn execute(
     ExecuteMsg::Decrement {} => try_decrement(deps),
     ExecuteMsg::Reset { count } => try_reset(deps, info, count),
     ExecuteMsg::UpdateOwner { address } => try_update_owner(deps, info, address),
+
+    ExecuteMsg::StartGame { opponent } => try_start_game(deps, opponent),
   }
 }
 
@@ -91,6 +93,13 @@ pub fn try_update_owner(deps: DepsMut, info: MessageInfo, address: String) -> Re
   STATE.save(deps.storage, &state)?;
  
   Ok(Response::new().add_attribute("method", "reset"))
+}
+
+pub fn try_start_game(deps: DepsMut, opponent: String) -> Result<Response, ContractError> {
+
+  let opp = deps.api.addr_validate(&opponent)?;
+
+  Ok(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &opp.to_string())]))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -235,5 +244,32 @@ mod tests {
     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
     let value: OwnerResponse = from_binary(&res).unwrap();
     assert_eq!(String::from("anyone"), value.owner);
+  }
+
+  #[test]
+  fn start_game() {
+    let mut deps = mock_dependencies(&coins(2, "token"));
+
+    let msg = InstantiateMsg { count: 17 };
+    let info = mock_info("creator", &coins(2, "token"));
+    let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+    // try to set contract's owner to rando sender
+    let unauth_info = mock_info("", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame { opponent: unauth_info.sender.to_string() };
+    let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
+
+    match res {
+      Err(_err) => {}
+      _ => panic!("Must return unauthorized error"),
+    }
+
+    // only a legit address can be an opponent
+    let auth_info = mock_info("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame { opponent: auth_info.sender.to_string() };
+    let res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+
+    assert_eq!(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &String::from("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9"))]), res)
+
   }
 }
