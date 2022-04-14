@@ -107,7 +107,7 @@ pub fn try_start_game(deps: DepsMut, info: MessageInfo, opponent: String, host_m
     result: None,
   };
 
-  GAMES.save(deps.storage, info.sender, &game_state)?;
+  GAMES.save(deps.storage, (info.sender, opp.clone()), &game_state)?;
 
   Ok(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &opp.to_string()), ("host_move", &match host_move {GameMove::Rock => String::from("rock"), GameMove::Paper => String::from("paper"), GameMove::Scissors => String::from("scissors")})]))
 }

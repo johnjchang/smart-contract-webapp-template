@@ -26,4 +26,4 @@ pub struct GameState {
 }
 
 pub const STATE: Item<State> = Item::new("state");
-pub const GAMES: Map<Addr, GameState> = Map::new("games");
+pub const GAMES: Map<(Addr, Addr) , GameState> = Map::new("games");
