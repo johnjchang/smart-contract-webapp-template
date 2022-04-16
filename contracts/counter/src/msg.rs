@@ -65,6 +65,10 @@ pub enum QueryMsg {
   GetOwner {},
 
   GetAdmin {},
+
+  GamesByHost { host: String },
+
+  GamesByOpponent { opponent: String },
 }
 
 /// Response type of QueryMsg.GetCount

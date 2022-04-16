@@ -1,12 +1,11 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr, Order};
 use cw2::set_contract_version;
-use cw_controllers::Admin;
 
 use crate::error::ContractError;
 use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, OwnerResponse, GameMove, GameResult, AdminResponse};
-use crate::state::{State, STATE, GameState, GAMES, ADMIN, HOOKS};
+use crate::state::{State, STATE, GameState, ADMIN, HOOKS, Games};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:counter";
@@ -124,7 +123,8 @@ pub fn try_start_game(deps: DepsMut, info: MessageInfo, opponent: String, host_m
     result: None,
   };
 
-  GAMES.save(deps.storage, (info.sender, opp.clone()), &game_state)?;
+  let games = Games::default();
+  games.states.save(deps.storage, (info.sender.clone(), opp.clone()), &game_state)?;
 
   Ok(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &opp.to_string()), ("host_move", &match host_move {GameMove::Rock => String::from("rock"), GameMove::Paper => String::from("paper"), GameMove::Scissors => String::from("scissors")})]))
 }
@@ -139,7 +139,7 @@ pub fn try_update_admin(deps: DepsMut, info: MessageInfo, admin: String) -> Resu
 
   ADMIN.execute_update_admin::<()>(deps, info, Some(admin))?;
 
-  Ok(Response::new().add_attribute("method", "reset"))
+  Ok(Response::new().add_attribute("method", "update_admin"))
 }
 
 pub fn try_respond(deps: DepsMut, info: MessageInfo, host: String, opponent: String, opp_move: GameMove) -> Result<Response, ContractError> {
@@ -153,7 +153,8 @@ pub fn try_respond(deps: DepsMut, info: MessageInfo, host: String, opponent: Str
   let opp_addr: Addr = deps.api.addr_validate(&opponent)?;
 
   // fetch game
-  let game: GameState = GAMES.load(deps.storage, (host_addr.clone(), opp_addr.clone()))?;
+  let games = Games::default();
+  let game: GameState = games.states.load(deps.storage, (host_addr.clone(), opp_addr.clone()))?;
 
   let host_move: GameMove = game.host_move;
 
@@ -170,7 +171,7 @@ pub fn try_respond(deps: DepsMut, info: MessageInfo, host: String, opponent: Str
     result = GameResult::Tie;
   }
 
-  GAMES.remove(deps.storage, (host_addr, opp_addr));
+  games.states.remove(deps.storage, (host_addr.clone(), opp_addr.clone()))?;
 
   Ok(Response::new().add_attributes(vec![("method", "start_game")]).set_data(to_binary(&result)?))
 }
@@ -181,6 +182,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
     QueryMsg::GetOwner {} => to_binary(&query_owner(deps)?),
     QueryMsg::GetAdmin {} => to_binary(&query_admin(deps)?),
+    QueryMsg::GamesByHost { host } => to_binary(&query_games_by_host(deps, host)?),
+    QueryMsg::GamesByOpponent { opponent } => to_binary(&query_games_by_opponent(deps, opponent)?),
   }
 }
 
@@ -202,6 +205,46 @@ fn query_admin(deps: Deps) -> StdResult<AdminResponse> {
     _ => admin.unwrap().to_string(),
 
   } })
+}
+
+fn query_games_by_host(deps: Deps, host: String) -> StdResult<Vec<GameState>> {
+  let games = Games::default();
+
+  games
+  .states
+  .prefix(deps.api.addr_validate(&host)?)
+  .range(deps.storage, None, None, Order::Ascending)
+  .map(|x| {
+
+    //map item's 2nd element is the gamestate data
+    let (_, res) = x?;
+
+    //cast to gamestate
+    let v: GameState = res;
+    Ok(v)
+  })
+  .collect()
+}
+
+fn query_games_by_opponent(deps: Deps, opponent: String) -> StdResult<Vec<GameState>> {
+  let games = Games::default();
+
+  games
+  .states
+  .idx
+  .opponent
+  .prefix(deps.api.addr_validate(&opponent)?)
+  .range(deps.storage, None, None, Order::Ascending)
+  .map(|x| {
+
+    //map item's 2nd element is the gamestate data
+    let (_, res) = x?;
+
+    //cast to gamestate
+    let v: GameState = res;
+    Ok(v)
+  })
+  .collect()
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -387,6 +430,106 @@ mod tests {
     let res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
 
     assert_eq!(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &String::from("terra18kgwjqrm7mcnlzcy7l8h7awnn7fs2pvdl2tpm9")), ("host_move", &String::from("scissors"))]), res);
+  }
 
+  #[test]
+  fn update_admin() {
+    let mut deps = mock_dependencies(&coins(2, "token"));
+
+    let msg = InstantiateMsg { count: 17 };
+    let info = mock_info("creator", &coins(2, "token"));
+    let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+    // test update admin with rando account
+    let auth_info = mock_info("rando", &coins(2, "token"));
+    let msg = ExecuteMsg::UpdateAdmin { admin: auth_info.sender.to_string() };
+    let res = execute(deps.as_mut(), mock_env(), auth_info.clone(), msg);
+    match res {
+      Err(ContractError::Admin(_)) => {}
+      _ => panic!("Must return admin error"),
+    }
+
+    // test update admin with legit admin
+    let msg = ExecuteMsg::UpdateAdmin { admin: auth_info.sender.to_string() };
+    let _res = execute(deps.as_mut(), mock_env(), info, msg);
+    
+    let res = query(deps.as_ref(), mock_env(), QueryMsg::GetAdmin {}).unwrap();
+    let value: AdminResponse = from_binary(&res).unwrap();
+    assert_eq!(String::from("rando"), value.admin);
+  }
+
+  #[test]
+  fn multikey_game() {
+    let mut deps = mock_dependencies(&coins(2, "token"));
+
+    let msg = InstantiateMsg { count: 17 };
+    let info = mock_info("creator", &coins(2, "token"));
+    let _res = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+    // make a few accounts
+    let player_1 = mock_info("rando69", &coins(2, "token"));
+    let player_2 = mock_info("rando420", &coins(2, "token"));
+
+    //start bunch of games
+    let msg_1 = ExecuteMsg::StartGame { opponent: player_1.sender.to_string(), host_move: GameMove::Rock};
+    execute(deps.as_mut(), mock_env(), info.clone(), msg_1);
+
+    let msg_2 = ExecuteMsg::StartGame { opponent: player_2.sender.to_string(), host_move: GameMove::Paper};
+    execute(deps.as_mut(), mock_env(), info.clone(), msg_2);
+
+    let msg_3 = ExecuteMsg::StartGame { opponent: player_2.sender.to_string(), host_move: GameMove::Scissors};
+    execute(deps.as_mut(), mock_env(), player_1.clone(), msg_3);
+
+    //check the games by host query
+    let res = query(deps.as_ref(), mock_env(), QueryMsg::GamesByHost {host: info.sender.to_string()}).unwrap();
+    let mut games: Vec<GameState> = from_binary(&res).unwrap();
+    games.sort_by_key(|k| k.opponent.to_string());
+
+    
+    let game_1: GameState = GameState{
+      host: info.sender.clone(),
+      opponent: player_2.sender.clone(),
+      host_move: GameMove::Paper,
+      opp_move: None,
+      result: None,
+    };
+    let game_2: GameState = GameState{
+      host: info.sender.clone(),
+      opponent: player_1.sender.clone(),
+      host_move: GameMove::Rock,
+      opp_move: None,
+      result: None,
+    };
+
+    let mut games_vec = vec![];
+    games_vec.push(game_1);
+    games_vec.push(game_2);
+    assert_eq!(games_vec, games);
+
+    //check the games by opp query
+    let res = query(deps.as_ref(), mock_env(), QueryMsg::GamesByOpponent {opponent: player_2.sender.to_string()}).unwrap();
+    let mut games: Vec<GameState> = from_binary(&res).unwrap();
+    games.sort_by_key(|k| k.host.to_string());
+    
+    let game_1: GameState = GameState{
+      host: info.sender.clone(),
+      opponent: player_2.sender.clone(),
+      host_move: GameMove::Paper,
+      opp_move: None,
+      result: None,
+    };
+
+    let game_2: GameState = GameState{
+      host: player_1.sender.clone(),
+      opponent: player_2.sender.clone(),
+      host_move: GameMove::Scissors,
+      opp_move: None,
+      result: None,
+    };
+
+    let mut games_vec = vec![];
+    games_vec.push(game_1);
+    games_vec.push(game_2);
+    assert_eq!(games_vec, games);
   }
 }
