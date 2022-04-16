@@ -32,6 +32,24 @@ pub enum ExecuteMsg {
     opponent: String,
     host_move: GameMove,
   },
+
+  UpdateAdmin{
+    admin: String,
+  },
+
+  AddHook {
+    hook: String,
+  },
+
+  RemoveHook{
+    hook: String,
+  },
+
+  Respond{
+    host: String,
+    opponent: String,
+    opp_move: GameMove,
+  }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -45,6 +63,8 @@ pub enum QueryMsg {
   
   /// @return OwnerResponse
   GetOwner {},
+
+  GetAdmin {},
 }
 
 /// Response type of QueryMsg.GetCount
@@ -59,6 +79,13 @@ pub struct CountResponse {
 pub struct OwnerResponse {
   /// owner property
   pub owner: String,
+}
+
+/// Response type of QueryMsg.GetAdmin
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AdminResponse {
+  /// admin property
+  pub admin: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

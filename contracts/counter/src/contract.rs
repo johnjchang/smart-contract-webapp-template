@@ -1,11 +1,12 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr};
 use cw2::set_contract_version;
+use cw_controllers::Admin;
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, OwnerResponse, GameMove, GameResult};
-use crate::state::{State, STATE, GameState, GAMES};
+use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, OwnerResponse, GameMove, GameResult, AdminResponse};
+use crate::state::{State, STATE, GameState, GAMES, ADMIN, HOOKS};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:counter";
@@ -24,6 +25,7 @@ pub fn instantiate(
   };
   set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
   STATE.save(deps.storage, &state)?;
+  ADMIN.set(deps, Some(info.sender.clone()))?;
 
   Ok(
     Response::new()
@@ -47,6 +49,16 @@ pub fn execute(
     ExecuteMsg::UpdateOwner { address } => try_update_owner(deps, info, address),
 
     ExecuteMsg::StartGame { opponent, host_move } => try_start_game(deps, info, opponent, host_move),
+    ExecuteMsg::UpdateAdmin { admin } => try_update_admin(deps, info, admin),
+    ExecuteMsg::AddHook { hook } => {
+      let hook_addr = deps.api.addr_validate(&hook)?;
+      Ok(HOOKS.execute_add_hook(&ADMIN, deps, info, hook_addr)?)
+    },
+    ExecuteMsg::RemoveHook { hook } => {
+      let hook_addr = deps.api.addr_validate(&hook)?;
+      Ok(HOOKS.execute_remove_hook(&ADMIN, deps, info, hook_addr)?)
+    },
+    ExecuteMsg::Respond { host, opponent, opp_move } => try_respond(deps, info, host, opponent, opp_move),
   }
 }
 
@@ -97,6 +109,11 @@ pub fn try_update_owner(deps: DepsMut, info: MessageInfo, address: String) -> Re
 
 pub fn try_start_game(deps: DepsMut, info: MessageInfo, opponent: String, host_move: GameMove) -> Result<Response, ContractError> {
 
+  //blacklist check
+  if HOOKS.query_hooks(deps.as_ref())?.hooks.contains(&info.sender.to_string()){
+    return Err(ContractError::Blacklist{})
+  }
+
   let opp = deps.api.addr_validate(&opponent)?;
 
   let game_state: GameState = GameState{
@@ -112,11 +129,58 @@ pub fn try_start_game(deps: DepsMut, info: MessageInfo, opponent: String, host_m
   Ok(Response::new().add_attributes(vec![("method", "start_game"), ("opponent", &opp.to_string()), ("host_move", &match host_move {GameMove::Rock => String::from("rock"), GameMove::Paper => String::from("paper"), GameMove::Scissors => String::from("scissors")})]))
 }
 
+pub fn try_update_admin(deps: DepsMut, info: MessageInfo, admin: String) -> Result<Response, ContractError> {
+ 
+  //priv check
+  ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+  //update admin
+  let admin: Addr = deps.as_ref().api.addr_validate(&admin)?;
+
+  ADMIN.execute_update_admin::<()>(deps, info, Some(admin))?;
+
+  Ok(Response::new().add_attribute("method", "reset"))
+}
+
+pub fn try_respond(deps: DepsMut, info: MessageInfo, host: String, opponent: String, opp_move: GameMove) -> Result<Response, ContractError> {
+
+  //opponent/sender check
+  if info.sender != deps.api.addr_validate(&opponent)?{
+    return Err(ContractError::Blacklist{})
+  }
+
+  let host_addr: Addr = deps.api.addr_validate(&host)?;
+  let opp_addr: Addr = deps.api.addr_validate(&opponent)?;
+
+  // fetch game
+  let game: GameState = GAMES.load(deps.storage, (host_addr.clone(), opp_addr.clone()))?;
+
+  let host_move: GameMove = game.host_move;
+
+  //evaluate game result
+  let mut result:GameResult = GameResult::HostWins;
+
+  if (host_move == GameMove::Rock) && (opp_move == GameMove::Paper){
+    result = GameResult::OpponentWins;
+  } else if (host_move == GameMove::Paper) && (opp_move == GameMove::Scissors) {
+    result = GameResult::OpponentWins;
+  } else if (host_move == GameMove::Scissors) && (opp_move == GameMove::Rock) {
+    result = GameResult::OpponentWins;
+  } else if host_move == opp_move {
+    result = GameResult::Tie;
+  }
+
+  GAMES.remove(deps.storage, (host_addr, opp_addr));
+
+  Ok(Response::new().add_attributes(vec![("method", "start_game")]).set_data(to_binary(&result)?))
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
   match msg {
     QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
     QueryMsg::GetOwner {} => to_binary(&query_owner(deps)?),
+    QueryMsg::GetAdmin {} => to_binary(&query_admin(deps)?),
   }
 }
 
@@ -128,6 +192,16 @@ fn query_count(deps: Deps) -> StdResult<CountResponse> {
 fn query_owner(deps: Deps) -> StdResult<OwnerResponse> {
   let state = STATE.load(deps.storage)?;
   Ok(OwnerResponse { owner: state.owner.to_string() })
+}
+
+fn query_admin(deps: Deps) -> StdResult<AdminResponse> {
+  let admin: Option<Addr> = ADMIN.get(deps)?;
+
+  Ok(AdminResponse { admin: match admin {
+    None => String::from(""),
+    _ => admin.unwrap().to_string(),
+
+  } })
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

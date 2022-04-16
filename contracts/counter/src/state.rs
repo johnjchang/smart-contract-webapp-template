@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::Addr;
 use cw_storage_plus::{Item, Map};
+use cw_controllers::{Admin, Hooks};
 
 use crate::msg::{GameResult, GameMove};
 
@@ -27,3 +28,5 @@ pub struct GameState {
 
 pub const STATE: Item<State> = Item::new("state");
 pub const GAMES: Map<(Addr, Addr) , GameState> = Map::new("games");
+pub const ADMIN: Admin = Admin::new("admin");
+pub const HOOKS: Hooks = Hooks::new("hooks");
